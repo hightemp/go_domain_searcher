@@ -1,4 +1,4 @@
-module domain_search_service
+module go_domain_searcher
 
 go 1.23.2
 
