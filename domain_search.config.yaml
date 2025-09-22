@@ -14,17 +14,17 @@ generator:
   forbid_double_hyphen: true
 
 limits:
-  concurrency: 1500         # number of concurrent checks
-  rate_per_second: 3000     # global RPS limit
+  concurrency: 30         # number of concurrent checks
+  rate_per_second: 300     # global RPS limit
   max_candidates: 1000000000   # maximum generated domain names per pass
 
 http_check:
   timeout: "3s"
-  retry: 1
+  retry: 0
   method: "GET"
   body_limit: "32KB"
   accept_status_min: 200
-  accept_status_max: 399
+  accept_status_max: 1000
   try_https_first: true
 
 run:
