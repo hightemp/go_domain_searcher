@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,6 +38,7 @@ type Config struct {
 
 type GeneratorConfig struct {
 	TLDs                 []string `yaml:"tlds"`
+	TLDsFile             string   `yaml:"tlds_file"`
 	MinLength            int      `yaml:"min_length"`
 	MaxLength            int      `yaml:"max_length"`
 	Alphabet             string   `yaml:"alphabet"`
@@ -310,6 +313,121 @@ func renderBar(percent float64, width int) string {
 	return b.String()
 }
 
+func stripFormatMarks(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func loadTLDsFromFile(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	text := string(data)
+	re := regexp.MustCompile(`\.[^\s#]+`)
+	raw := re.FindAllString(text, -1)
+
+	uniq := make(map[string]struct{}, len(raw))
+	res := make([]string, 0, len(raw))
+	for _, tok := range raw {
+		t := strings.Trim(tok, " ,.;:()[]{}<>\"'“”‘’|")
+		t = stripFormatMarks(t)
+		t = strings.TrimSpace(t)
+		if t == "" || !strings.HasPrefix(t, ".") {
+			continue
+		}
+		// drop trailing punctuation if any
+		for len(t) > 0 {
+			last := t[len(t)-1]
+			switch last {
+			case '.', ',', ';', ':', ')', ']', '}', '"', '\'', '|', '>':
+				t = t[:len(t)-1]
+			default:
+				goto okTail
+			}
+		}
+	okTail:
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "." {
+			continue
+		}
+		if _, ok := uniq[t]; ok {
+			continue
+		}
+		uniq[t] = struct{}{}
+		res = append(res, t)
+	}
+	return res, nil
+}
+
+func loadTLDsFromURL(url string) ([]string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tlds url status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	uniq := make(map[string]struct{}, len(lines))
+	res := make([]string, 0, len(lines))
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		ln = stripFormatMarks(ln)
+		ln = strings.ToLower(ln)
+		if strings.HasPrefix(ln, ".") {
+			ln = strings.TrimPrefix(ln, ".")
+		}
+		t := "." + ln
+		if _, ok := uniq[t]; ok {
+			continue
+		}
+		uniq[t] = struct{}{}
+		res = append(res, t)
+	}
+	return res, nil
+}
+
+func maybeLoadTLDsFromSource(cfg *Config) error {
+	src := strings.TrimSpace(cfg.Generator.TLDsFile)
+	if src == "" {
+		return nil
+	}
+	var (
+		tlds []string
+		err  error
+	)
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+		tlds, err = loadTLDsFromURL(src)
+	} else {
+		tlds, err = loadTLDsFromFile(src)
+	}
+	if err != nil {
+		return err
+	}
+	if len(tlds) == 0 {
+		return fmt.Errorf("no TLDs parsed from %s", src)
+	}
+	cfg.Generator.TLDs = tlds
+	return nil
+}
+
 func fmtDuration(d time.Duration) string {
 	if d < 0 {
 		return "-"
@@ -340,11 +458,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("config load error: %v", err)
 	}
-	if err := validateConfig(cfg); err != nil {
-		log.Fatalf("config validation error: %v", err)
-	}
 	if *loopFlag {
 		cfg.Run.Loop = *loopFlag
+	}
+	// Load TLDs from external source if configured
+	if err := maybeLoadTLDsFromSource(&cfg); err != nil {
+		log.Fatalf("tlds load error: %v", err)
+	}
+	if err := validateConfig(cfg); err != nil {
+		log.Fatalf("config validation error: %v", err)
 	}
 
 	httpClient := &http.Client{
@@ -377,8 +499,8 @@ func main() {
 		totalPlanned = 0
 	}
 
-	log.Printf("domain CLI started (config: %s), RPS=%d, Concurrency=%d, Loop=%v, out=%s",
-		*cfgPathFlag, cfg.Limits.RatePerSecond, cfg.Limits.Concurrency, cfg.Run.Loop, *outDirFlag)
+	log.Printf("domain CLI started (config: %s), RPS=%d, Concurrency=%d, Loop=%v, out=%s, TLDs=%d",
+		*cfgPathFlag, cfg.Limits.RatePerSecond, cfg.Limits.Concurrency, cfg.Run.Loop, *outDirFlag, len(cfg.Generator.TLDs))
 
 	for {
 		if err := runOnce(ctx, httpClient, cfg, wm, totalPlanned); err != nil {

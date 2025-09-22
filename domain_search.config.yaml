@@ -1,8 +1,10 @@
 version: 1
 
 generator:
-  # Profile 3 (extended)
-  tlds: [".com", ".net", ".org", ".ru"]
+  # Full TLD list (IANA). If provided, overrides 'tlds' list.
+  # Official, frequently updated source:
+  # https://data.iana.org/TLD/tlds-alpha-by-domain.txt
+  tlds_file: "https://data.iana.org/TLD/tlds-alpha-by-domain.txt"
   min_length: 1
   max_length: 20
   alphabet: "abcdefghijklmnopqrstuvwxyz0123456789-"
