@@ -1,0 +1,29 @@
+version: 1
+
+generator:
+  # Profile 3 (extended)
+  tlds: [".com", ".net", ".org", ".ru"]
+  min_length: 1
+  max_length: 20
+  alphabet: "abcdefghijklmnopqrstuvwxyz0123456789-"
+  allow_hyphen: true
+  forbid_leading_hyphen: true
+  forbid_trailing_hyphen: true
+  forbid_double_hyphen: true
+
+limits:
+  concurrency: 1500         # number of concurrent checks
+  rate_per_second: 3000     # global RPS limit
+  max_candidates: 1000000000   # maximum generated domain names per pass
+
+http_check:
+  timeout: "3s"
+  retry: 1
+  method: "GET"
+  body_limit: "32KB"
+  accept_status_min: 200
+  accept_status_max: 399
+  try_https_first: true
+
+run:
+  loop: false        # repeat the generation loop when max_candidates is reached
