@@ -1,4 +1,4 @@
-# domain_search
+# go_domain_searcher
 
 Fast domain candidate generator and HTTP liveness checker written in Go. It enumerates label strings, appends TLDs, and probes domains over HTTP/HTTPS with rate limiting and concurrency, writing working domains to per‑TLD files.
 
